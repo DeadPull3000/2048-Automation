@@ -4,7 +4,7 @@ import torch.nn as nn
 import numpy as np
 import random
 from collections import deque
-from models.q_network import DQNNetwork
+from models.q_network import DuelingDQNNetwork
 
 class ReplayBuffer:
     def __init__(self, capacity):
@@ -25,8 +25,8 @@ class DQNAgent:
         self.gamma = gamma
         self.action_dim = action_dim
         
-        self.policy_net = DQNNetwork(state_dim, action_dim).to(self.device)
-        self.target_net = DQNNetwork(state_dim, action_dim).to(self.device)
+        self.policy_net = DuelingDQNNetwork(state_dim, action_dim).to(self.device)
+        self.target_net = DuelingDQNNetwork(state_dim, action_dim).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
@@ -68,6 +68,7 @@ class DQNAgent:
             
             # Select the highest VALID Q-value
             return masked_q_values.argmax().item()
+        
     def train_step(self, batch_size):
         if len(self.memory) < batch_size:
             return
@@ -75,19 +76,25 @@ class DQNAgent:
         batch = self.memory.sample(batch_size)
         states, actions, rewards, next_states, dones = zip(*batch)
 
-        # Preprocess all states in batch
         states_t = torch.cat([self.preprocess(s) for s in states])
         next_states_t = torch.cat([self.preprocess(s) for s in next_states])
         actions_t = torch.LongTensor(actions).unsqueeze(1).to(self.device)
         rewards_t = torch.FloatTensor(rewards).to(self.device)
         dones_t = torch.FloatTensor(dones).to(self.device)
 
-        # Current Q values
+        # 1. Current Q Values from Policy Net
         current_q = self.policy_net(states_t).gather(1, actions_t)
 
-        # Max Next Q values (Target)
-        next_q = self.target_net(next_states_t).max(1)[0].detach()
-        target_q = rewards_t + (1 - dones_t) * self.gamma * next_q
+        # 2. DOUBLE DQN LOGIC
+        # Step A: Use Policy Net to PICK the best action for the next state
+        with torch.no_grad():
+            next_actions = self.policy_net(next_states_t).argmax(1).unsqueeze(1)
+            
+            # Step B: Use Target Net to EVALUATE that action
+            next_q = self.target_net(next_states_t).gather(1, next_actions).squeeze(1)
+            
+            # 3. Calculate target Q value
+            target_q = rewards_t + (1 - dones_t) * self.gamma * next_q
 
         loss = nn.MSELoss()(current_q.squeeze(), target_q)
         
