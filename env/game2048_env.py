@@ -137,6 +137,20 @@ class Game2048Env(gym.Env):
                 if self.board[r][c] == self.board[r][c+1] or self.board[c][r] == self.board[c+1][r]:
                     return True
         return False
+    
+    def get_valid_actions(self):
+        """Returns a list of valid action integers (0, 1, 2, 3)"""
+        valid_actions =[]
+        original_board = self.board.copy()
+        
+        for action in range(4):
+            _, moved = self.move(action)
+            if moved:
+                valid_actions.append(action)
+            # Restore the board after testing the move
+            self.board = original_board.copy()
+            
+        return valid_actions
 
     def render(self):
         print(self.board)
